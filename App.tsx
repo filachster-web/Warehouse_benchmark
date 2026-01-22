@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WarehouseInputs, BenchmarkResults, DockType, SavedCalculation } from './types';
-import { calculateBenchmarks, defaultInputs } from './utils/formulas';
+import { calculateBenchmarks, defaultInputs, generateMarkdown, parseMarkdown } from './utils/formulas';
 import { InputCard } from './components/InputCard';
 import { ResultMetric } from './components/ResultMetric';
 import { 
@@ -19,7 +19,8 @@ import {
   FolderOpen,
   Download,
   Upload,
-  FileJson
+  FileJson,
+  FileText
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
@@ -93,11 +94,24 @@ const App: React.FC = () => {
     }
   };
 
-  const handleExport = () => {
+  // Export all saved as JSON
+  const handleExportJSON = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(savedCalcs));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
     downloadAnchorNode.setAttribute("download", "warehouse_benchmarks_backup.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  // Export current state as Markdown
+  const handleExportMarkdown = () => {
+    const mdContent = generateMarkdown(inputs, results, "Текущий расчет");
+    const dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(mdContent);
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "calculation_report.md");
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
@@ -111,22 +125,39 @@ const App: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const fileName = file.name.toLowerCase();
     const reader = new FileReader();
+    
     reader.onload = (e) => {
+      const content = e.target?.result as string;
+      
       try {
-        const content = e.target?.result as string;
-        const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) {
-          // Merge strategy: add imported ones to current
-          const newSaves = [...parsed, ...savedCalcs];
-          // Simple dedup by ID could be added here, but strictly relying on timestamp IDs from different sources might clash theoretically, but rare practically.
-          setSavedCalcs(newSaves);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(newSaves));
-          alert(`Успешно импортировано ${parsed.length} расчетов.`);
+        if (fileName.endsWith('.json')) {
+          // JSON Import (Backup)
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed)) {
+            const newSaves = [...parsed, ...savedCalcs];
+            setSavedCalcs(newSaves);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(newSaves));
+            alert(`Успешно импортировано ${parsed.length} расчетов из JSON.`);
+          } else {
+            alert("Неверный формат JSON файла.");
+          }
+        } else if (fileName.endsWith('.md')) {
+          // Markdown Import (Single Calculation)
+          const parsedInputs = parseMarkdown(content);
+          if (parsedInputs) {
+            if (confirm("Найдены данные расчета в Markdown файле. Загрузить их в форму?")) {
+              setInputs(parsedInputs);
+            }
+          } else {
+            alert("Не удалось распознать данные в Markdown файле. Убедитесь, что формат соответствует экспортируемому.");
+          }
         } else {
-          alert("Неверный формат файла.");
+          alert("Поддерживаются только .json и .md файлы.");
         }
       } catch (err) {
+        console.error(err);
         alert("Ошибка чтения файла.");
       }
     };
@@ -148,7 +179,7 @@ const App: React.FC = () => {
         type="file" 
         ref={fileInputRef} 
         onChange={handleImportFile} 
-        accept=".json" 
+        accept=".json,.md" 
         style={{ display: 'none' }} 
       />
 
@@ -228,13 +259,13 @@ const App: React.FC = () => {
             {/* Saved Calculations Section */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-xs font-bold text-slate-500 uppercase">Сохраненные расчеты</h3>
+                <h3 className="text-xs font-bold text-slate-500 uppercase">Управление</h3>
                 <div className="flex gap-1">
-                   <button onClick={handleImportTrigger} title="Импорт из JSON" className="p-1 text-slate-400 hover:text-blue-600 transition-colors">
-                     <Upload size={14} />
+                   <button onClick={handleImportTrigger} title="Импорт (JSON / MD)" className="p-1 text-slate-400 hover:text-blue-600 transition-colors">
+                     <Upload size={16} />
                    </button>
-                   <button onClick={handleExport} title="Экспорт в JSON" className="p-1 text-slate-400 hover:text-blue-600 transition-colors">
-                     <Download size={14} />
+                   <button onClick={handleExportJSON} title="Бэкап всех (JSON)" className="p-1 text-slate-400 hover:text-blue-600 transition-colors">
+                     <FileJson size={16} />
                    </button>
                 </div>
               </div>
@@ -264,13 +295,20 @@ const App: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <div className="p-3 border-t border-slate-100 bg-slate-50">
+              <div className="p-3 border-t border-slate-100 bg-slate-50 space-y-2">
                 <button 
                   onClick={handleSave}
                   className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors shadow-sm"
                 >
                   <Save size={16} />
-                  Сохранить текущий
+                  Сохранить
+                </button>
+                <button 
+                  onClick={handleExportMarkdown}
+                  className="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 py-2 px-4 rounded-lg text-sm font-medium transition-colors shadow-sm"
+                >
+                  <FileText size={16} className="text-slate-400" />
+                  Скачать отчет (MD)
                 </button>
               </div>
             </div>

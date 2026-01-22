@@ -92,3 +92,104 @@ export const defaultInputs: WarehouseInputs = {
   mheTechnicalReadiness: 0.9,
   mheUtilizationShift: 0.85
 };
+
+// --- MARKDOWN UTILITIES ---
+
+export const INPUT_LABELS: Record<keyof WarehouseInputs, string> = {
+  truckLength: "Длина автопоезда (м)",
+  dockType: "Тип постановки (STRAIGHT/ANGLED)",
+  dockAngle: "Угол постановки (град)",
+  dailyFlow: "Суточный поток (паллет)",
+  unevennessCoef: "Коэффициент неравномерности (Kn)",
+  workHoursPerDay: "Время работы склада (часов)",
+  dockThroughput: "Пропускная способность ворот (пал/час)",
+  receivingDwellTime: "Время нахождения в зоне приемки (суток)",
+  areaLoadLimit: "Нагрузка на пол (пал/м2)",
+  areaUtilization: "Коэффициент использования площади (Kisp)",
+  pickingVolume: "Объем сборки (м3 или ед)",
+  pickingSectors: "Количество секторов сборки",
+  pickingTime: "Время комплектации заказа (часов)",
+  palletArea: "Площадь паллеты (м2)",
+  orderHeight: "Высота заказа (м)",
+  pickingWorkTime: "Время работы зоны комплектации (часов)",
+  unitProcessTime: "Время обработки единицы (мин)",
+  shiftVolume: "Объем за смену (ед)",
+  coefExtraOps: "Коэффициент неучтенных операций (K1)",
+  coefAbsenteeism: "Коэффициент абсентеизма (K2)",
+  shiftDuration: "Длительность смены (часов)",
+  breakTime: "Время перерывов (мин)",
+  mheTotalUnits: "Объем для техники (паллет/смена)",
+  mheCycleTime: "Время цикла техники (мин)",
+  mheTechnicalReadiness: "Коэффициент технической готовности (KTG)",
+  mheUtilizationShift: "Коэффициент утилизации смены"
+};
+
+export const generateMarkdown = (inputs: WarehouseInputs, results: BenchmarkResults, name: string = "Расчет"): string => {
+  const date = new Date().toLocaleString('ru-RU');
+  let md = `# Отчет: ${name}\n`;
+  md += `**Дата**: ${date}\n\n`;
+  
+  md += `## 1. Входные параметры\n\n`;
+  (Object.keys(INPUT_LABELS) as Array<keyof WarehouseInputs>).forEach(key => {
+    md += `- **${INPUT_LABELS[key]}**: ${inputs[key]}\n`;
+  });
+
+  md += `\n## 2. Результаты расчетов\n\n`;
+  md += `### Инфраструктура\n`;
+  md += `- **Глубина маневровой площадки**: ${results.maneuverDepth} м\n`;
+  md += `- **Количество доков**: ${results.requiredDocks} шт\n`;
+  
+  md += `\n### Зоны\n`;
+  md += `- **Площадь зоны приемки**: ${results.receivingArea} м²\n`;
+  md += `- **Постов комплектации**: ${results.pickingStations} шт\n`;
+  
+  md += `\n### Ресурсы\n`;
+  md += `- **Численность персонала**: ${results.personnelCount} чел\n`;
+  md += `- **Единиц техники (ПТО)**: ${results.mheCount} ед\n`;
+
+  md += `\n---\n*Сгенерировано в Warehouse Benchmark Pro 2025*`;
+
+  return md;
+};
+
+export const parseMarkdown = (md: string): WarehouseInputs | null => {
+  try {
+    const lines = md.split('\n');
+    const newInputs: any = { ...defaultInputs };
+    let foundCount = 0;
+
+    lines.forEach(line => {
+      // Regex to match "- **Label**: Value"
+      // We accept slight variations in spacing
+      const match = line.match(/^\s*-\s*\*\*(.+?)\*\*:\s*(.+)/);
+      if (match) {
+        const label = match[1].trim();
+        const valueStr = match[2].trim();
+        
+        // Find key by label
+        const key = (Object.keys(INPUT_LABELS) as Array<keyof WarehouseInputs>).find(k => INPUT_LABELS[k] === label);
+        
+        if (key) {
+           foundCount++;
+           if (key === 'dockType') {
+             // Handle Enum parsing
+             newInputs[key] = valueStr.includes('ANGLED') ? DockType.ANGLED : DockType.STRAIGHT;
+           } else {
+             // Handle Number parsing
+             const num = parseFloat(valueStr);
+             if (!isNaN(num)) {
+               newInputs[key] = num;
+             }
+           }
+        }
+      }
+    });
+
+    // If we found a significant number of fields, we assume success
+    if (foundCount < 5) return null; 
+    return newInputs as WarehouseInputs;
+  } catch (e) {
+    console.error("Markdown parsing error", e);
+    return null;
+  }
+};
